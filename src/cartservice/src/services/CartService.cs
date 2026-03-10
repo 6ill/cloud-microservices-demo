@@ -19,6 +19,7 @@ using Microsoft.Extensions.Logging;
 using cartservice.cartstore;
 using Hipstershop;
 
+# Testing CI
 namespace cartservice.services
 {
     public class CartService : Hipstershop.CartService.CartServiceBase
