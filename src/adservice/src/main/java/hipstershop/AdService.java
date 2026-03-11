@@ -65,7 +65,7 @@ public final class AdService {
         .addShutdownHook(
             new Thread(
                 () -> {
-                  // Use stderr here since the logger may have been reset by its JVM shutdown hook.
+                  // Use stderr here since the logger may have been reset by its JVM shutdown hook. 
                   System.err.println(
                       "*** shutting down gRPC ads server since JVM is shutting down");
                   AdService.this.stop();
