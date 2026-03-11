@@ -73,7 +73,7 @@ jobs:
           fetch-depth: 2 # Fetch at least 2 commits to perform git diff
 
       - name: Check if service source code changed
-        id: check_changes
+        id: prep
         run: |
           # Use git diff to check if the specific service directory was modified in the last commit.
           # --quiet returns exit code 0 if NO changes, and 1 if there ARE changes.
@@ -85,8 +85,14 @@ jobs:
             echo "changed=true" >> $GITHUB_OUTPUT
           fi
 
+          if [ -f "src/${{ matrix.service }}/src/Dockerfile" ]; then
+            echo "build_context=./src/${{ matrix.service }}/src" >> $GITHUB_OUTPUT
+          else
+            echo "build_context=./src/${{ matrix.service }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Log in to GitHub Container Registry
-        if: steps.check_changes.outputs.changed == 'true'
+        if: steps.prep.outputs.changed == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -94,18 +100,18 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Push Docker Image
-        if: steps.check_changes.outputs.changed == 'true'
+        if: steps.prep.outputs.changed == 'true'
         uses: docker/build-push-action@v5
         with:
           # Dynamically target the Dockerfile of the current matrix service
-          context: ./src/${{ matrix.service }}
+          context: ${{ steps.prep.outputs.build_context }}
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}:${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}:latest
 
       - name: Checkout Infrastructure Code
-        if: steps.check_changes.outputs.changed == 'true'
+        if: steps.prep.outputs.changed == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ env.INFRA_REPO }}
@@ -113,12 +119,12 @@ jobs:
           path: infra-repo # Checkout into a subfolder to avoid mixing with app code
 
       - name: Setup Kustomize
-        if: steps.check_changes.outputs.changed == 'true'
+        if: steps.prep.outputs.changed == 'true'
         uses: imranismail/setup-kustomize@v2
 
       # Solving Concurrency with Git Rebase & Retries
       - name: Update Kubernetes Manifests (GitOps Concurrency Handling)
-        if: steps.check_changes.outputs.changed == 'true'
+        if: steps.prep.outputs.changed == 'true'
         run: |
           cd infra-repo/deployment/environments/production
           
