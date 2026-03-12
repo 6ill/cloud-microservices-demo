@@ -19,7 +19,7 @@ using Microsoft.Extensions.Logging;
 using cartservice.cartstore;
 using Hipstershop;
 
-//  Testing CI Pipeline. 
+//  Testing CI Pipeline.
 namespace cartservice.services
 {
     public class CartService : Hipstershop.CartService.CartServiceBase
