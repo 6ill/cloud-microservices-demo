@@ -31,7 +31,7 @@ var (
 	ErrMismatchingCurrency = errors.New("mismatching currency codes")
 )
 
-// IsValid checks if specified value has a valid units/nanos signs and ranges.
+// IsValid checks if specified value has a valid units/nanos signs and ranges..
 func IsValid(m pb.Money) bool {
 	return signMatches(m) && validNanos(m.GetNanos())
 }
