@@ -24,6 +24,9 @@ import (
 	"cloud.google.com/go/profiler"
 	"github.com/gorilla/mux"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -57,6 +60,67 @@ var (
 
 	baseUrl = ""
 )
+
+var (
+	frontendRequestsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "frontend_http_requests_total",
+			Help: "Total number of HTTP requests to the frontend",
+		},
+		[]string{"method", "path", "status"},
+	)
+
+	frontendRequestDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "frontend_http_request_duration_seconds",
+			Help:    "Duration of HTTP requests in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"method", "path"},
+	)
+)
+
+type statusRecordingResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusRecordingResponseWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusRecordingResponseWriter) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK // Default 200 jika tidak diset eksplisit
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func prometheusMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		recorder := &statusRecordingResponseWriter{
+			ResponseWriter: w,
+			status:         http.StatusOK,
+		}
+
+		next.ServeHTTP(recorder, r)
+
+		duration := time.Since(start).Seconds()
+		statusStr := fmt.Sprintf("%d", recorder.status)
+
+		path := r.URL.Path
+		if route := mux.CurrentRoute(r); route != nil {
+			if tmpl, err := route.GetPathTemplate(); err == nil {
+				path = tmpl
+			}
+		}
+
+		frontendRequestsTotal.WithLabelValues(r.Method, path, statusStr).Inc()
+		frontendRequestDuration.WithLabelValues(r.Method, path).Observe(duration)
+	})
+}
 
 type ctxKeySessionID struct{}
 
@@ -161,8 +225,14 @@ func main() {
 	r.HandleFunc(baseUrl+"/_healthz", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "ok") })
 	r.HandleFunc(baseUrl+"/product-meta/{ids}", svc.getProductByID).Methods(http.MethodGet)
 	r.HandleFunc(baseUrl+"/bot", svc.chatBotHandler).Methods(http.MethodPost)
+	r.Handle("/metrics", promhttp.Handler())
+
+	if baseUrl != "" {
+		r.Handle(baseUrl+"/metrics", promhttp.Handler())
+	}
 
 	var handler http.Handler = r
+	handler = prometheusMiddleware(handler)            // add prometheus metrics
 	handler = &logHandler{log: log, next: handler}     // add logging
 	handler = ensureSessionID(handler)                 // add session ID
 	handler = otelhttp.NewHandler(handler, "frontend") // add OTel tracing
